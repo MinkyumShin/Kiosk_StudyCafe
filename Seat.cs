@@ -1,8 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace Kiosk_StudyCafe 
+namespace Kiosk_StudyCafe
 {
     // 좌석 상태와 타입을 정의
     public enum SeatStatus { Empty, InUse, Reserved, Maintenance }
@@ -53,18 +54,31 @@ namespace Kiosk_StudyCafe
         }
     }
 
-    public partial class Seat : Form 
+    public partial class Seat : Form
     {
-        public Seat() 
+        //백엔드 연동을 위한 변수 선언
+        private ReservationManager dbManager;
+        private string currentDate;
+        private string currentUserId;
+
+        //생성자에서 날짜와 유저 ID를 받아오도록 수정
+        public Seat(string date, string userId)
         {
+            this.currentDate = date;
+            this.currentUserId = userId;
+            this.dbManager = new ReservationManager();
+
             // 폼 기본 설정
-            this.Text = "스터디카페 좌석 배치도";
+            this.Text = $"{currentDate} 스터디카페 좌석 배치도";
             this.Size = new Size(1100, 750);
             this.BackColor = Color.White;
             this.StartPosition = FormStartPosition.CenterScreen;
 
             GenerateSeats();
             GenerateFacilities();
+
+            //화면이 열릴 때 DB를 확인해서 이미 예약된 좌석 칠하기
+            SyncSeatsWithDatabase();
         }
 
         private void GenerateSeats()
@@ -72,15 +86,11 @@ namespace Kiosk_StudyCafe
             int seatCount = 1;
 
             // --- 1. 1인실 50개 배치 (왼쪽 영역) ---
-            int singleWidth = 50;
-            int singleHeight = 40;
-            int startX = 50;
-            int startY = 50;
+            int singleWidth = 50, singleHeight = 40, startX = 50, startY = 50;
 
             for (int col = 0; col < 4; col++)
             {
-                int rows = 12;
-                for (int row = 0; row < rows; row++)
+                for (int row = 0; row < 12; row++)
                 {
                     CafeSeat seat = new CafeSeat(seatCount++, SeatType.Single);
                     seat.Size = new Size(singleWidth, singleHeight);
@@ -91,10 +101,8 @@ namespace Kiosk_StudyCafe
             }
 
             // --- 2. 그룹룸 10개 배치 (중앙-우측 영역) ---
-            int groupWidth = 80;
-            int groupHeight = 80;
-            startX = 500;
-            startY = 50;
+            int groupWidth = 80, groupHeight = 80;
+            startX = 500; startY = 50;
 
             for (int col = 0; col < 2; col++)
             {
@@ -129,29 +137,65 @@ namespace Kiosk_StudyCafe
             this.Controls.Add(counter);
         }
 
-        // 좌석 클릭 시 실행되는 테스트 이벤트
-        private void Seat_Click(object sender, EventArgs e)
+        //DB에서 예약된 좌석 목록을 불러와서 색상을 동기화
+        private void SyncSeatsWithDatabase()
         {
-            CafeSeat clickedSeat = sender as CafeSeat;
+            List<int> reservedSeats = dbManager.GetReservedSeats(currentDate);
+
+            foreach (Control control in this.Controls)
+            {
+                if (control is CafeSeat seat)
+                {
+                    if (reservedSeats.Contains(seat.SeatNumber))
+                        seat.Status = SeatStatus.Reserved;
+                    else
+                        seat.Status = SeatStatus.Empty;
+                }
+            }
+        }
+
+        // 좌석 클릭 시 실행되는 이벤트
+        private void Seat_Click(object? sender, EventArgs e)
+        {
+            CafeSeat? clickedSeat = sender as CafeSeat;
             if (clickedSeat == null) return;
 
-            // 점검 중인 좌석은 클릭 불가
+            // 점검 중이거나 예약된 좌석은 클릭 불가
             if (clickedSeat.Status == SeatStatus.Maintenance)
             {
-                MessageBox.Show("현재 점검 중인 좌석입니다.");
+                MessageBox.Show("현재 점검 중인 좌석입니다.", "선택 불가");
+                return;
+            }
+            if (clickedSeat.Status != SeatStatus.Empty)
+            {
+                MessageBox.Show("이미 예약되거나 이용 중인 좌석입니다.", "선택 불가");
                 return;
             }
 
-            // 시간 선택 창 띄우기 (현재 날짜 기준)
-            using (var timeForm = new TimeSelectionForm(clickedSeat.SeatNumber, DateTime.Now))
+            // 시간 선택 창 띄우기
+            using (var timeForm = new TimeSelectionForm(clickedSeat.SeatNumber, DateTime.Parse(currentDate)))
             {
                 if (timeForm.ShowDialog() == DialogResult.OK)
                 {
-                    string hours = string.Join(", ", timeForm.SelectedHours);
-                    MessageBox.Show($"{clickedSeat.SeatNumber}번 좌석\n선택한 시간: {hours}시\n예약이 완료되었습니다.");
+                    //선택한 시간 목록(리스트)의 개수를 이용 시간(hours)으로 계산
+                    int hours = timeForm.SelectedHours.Count > 0 ? timeForm.SelectedHours.Count : 1;
 
-                    // 예약이 완료되면 좌석 상태를 '이용 중' 혹은 '예약됨'으로 변경
-                    clickedSeat.Status = SeatStatus.InUse;
+                    //DB에 실제 예약 정보 저장 (중복 예약 방지 트랜잭션 포함)
+                    bool isSuccess = dbManager.ReserveSeat(currentUserId, clickedSeat.SeatNumber, currentDate, hours);
+
+                    if (isSuccess)
+                    {
+                        string timeList = string.Join(", ", timeForm.SelectedHours);
+                        MessageBox.Show($"{clickedSeat.SeatNumber}번 좌석\n선택한 시간: {timeList}시\n예약이 완료되었습니다.", "예약 확정");
+
+                        // 화면 좌석 색상 변경
+                        clickedSeat.Status = SeatStatus.Reserved;
+                    }
+                    else
+                    {
+                        MessageBox.Show("방금 전 다른 사용자가 예약한 좌석입니다. 다른 좌석을 선택해 주세요.", "예약 실패");
+                        SyncSeatsWithDatabase(); // 뺏긴 좌석 화면 새로고침
+                    }
                 }
             }
         }

@@ -7,16 +7,25 @@ namespace Kiosk_StudyCafe
     public partial class MainReserve : Form
     {
         // UI 컨트롤 선언
-        private Panel loginPanel;
-        private TextBox txtId;
-        private TextBox txtPw;
-        private Button btnLogin;
-        private Button btnSignUp;
+        private Panel loginPanel = null!;
+        private TextBox txtId = null!;
+        private TextBox txtPw = null!;
+        private Button btnLogin = null!;
+        private Button btnSignUp = null!;
 
-        private Panel reservationPanel;
-        private DateTimePicker datePicker;
-        private Button btnSelectSeat;
-        private Label lblStatus;
+        private Panel reservationPanel = null!;
+        private DateTimePicker datePicker = null!;
+        private Button btnSelectSeat = null!;
+        private Label lblStatus = null!;
+
+        //예약 백엔드 로직을 처리하는 매니저 객체
+        private ReservationManager dbManager = null!;
+
+        //1분(60초)마다 노쇼 및 시간 만료를 체크할 백그라운드 타이머
+        private System.Windows.Forms.Timer backgroundTimer = null!;
+
+        //로그인한 사용자의 ID를 저장해두었다가 예약 시 사용하기 위한 변수
+        private string loggedInUserId = "";
 
         public MainReserve()
         {
@@ -49,7 +58,6 @@ namespace Kiosk_StudyCafe
             loginPanel.Controls.Add(btnSignUp);
 
             // --- 2. 날짜 선택 영역 ---
-            // 처음엔 Enabled = false로 둬서 로그인 전에는 못 누르게 막아둠
             reservationPanel = new Panel { Size = new Size(400, 220), Location = new Point(200, 270), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Enabled = false };
 
             Label lblResTitle = new Label { Text = "예약 날짜 선택", Font = new Font("맑은 고딕", 14, FontStyle.Bold), Location = new Point(130, 15), AutoSize = true };
@@ -71,13 +79,25 @@ namespace Kiosk_StudyCafe
             this.Controls.Add(loginPanel);
             this.Controls.Add(reservationPanel);
             this.Controls.Add(lblStatus);
+
+            //데이터베이스 매니저 객체 생성 및 초기화
+            dbManager = new ReservationManager();
+
+            //백그라운드 타이머 설정 (60000ms = 1분 주기)
+            backgroundTimer = new System.Windows.Forms.Timer();
+            backgroundTimer.Interval = 60000;
+            backgroundTimer.Tick += BackgroundTimer_Tick;
+            backgroundTimer.Start();
         }
 
-        private void BtnLogin_Click(object sender, EventArgs e)
+        private void BtnLogin_Click(object? sender, EventArgs e)
         {
             // 간단한 유효성 검사 (아무거나 입력하면 로그인 성공)
             if (!string.IsNullOrEmpty(txtId.Text) && !string.IsNullOrEmpty(txtPw.Text))
             {
+                //예약 폼(Seat.cs)으로 넘겨주기 위해 현재 로그인한 사용자의 ID를 전역 변수에 저장
+                loggedInUserId = txtId.Text;
+
                 MessageBox.Show($"{txtId.Text}님, 로그인 성공!");
                 reservationPanel.Enabled = true; // 로그인 성공 시 예약 패널 활성화
                 loginPanel.Enabled = false;      // 중복 로그인 방지
@@ -88,12 +108,19 @@ namespace Kiosk_StudyCafe
             }
         }
 
-        private void BtnSelectSeat_Click(object sender, EventArgs e)
+        private void BtnSelectSeat_Click(object? sender, EventArgs e)
         {
             string selectedDate = datePicker.Value.ToShortDateString();
 
-            Seat seatForm = new Seat();
+            // 에러 안 나도록 파라미터(날짜, 로그인ID) 넘겨주기 적용
+            Seat seatForm = new Seat(selectedDate, loggedInUserId);
             seatForm.ShowDialog();
+        }
+
+        //타이머가 1분마다 실행하는 이벤트 핸들러. DB의 시간 만료 데이터와 노쇼 데이터를 자동 정리함.
+        private void BackgroundTimer_Tick(object? sender, EventArgs e)
+        {
+            dbManager.ProcessTimeoutsAndNoShows();
         }
     }
 }
