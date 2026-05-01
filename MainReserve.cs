@@ -92,19 +92,25 @@ namespace Kiosk_StudyCafe
 
         private void BtnLogin_Click(object? sender, EventArgs e)
         {
-            // 간단한 유효성 검사 (아무거나 입력하면 로그인 성공)
-            if (!string.IsNullOrEmpty(txtId.Text) && !string.IsNullOrEmpty(txtPw.Text))
+            UserManager userManager = new UserManager();
+
+            bool result = userManager.Login(txtId.Text, txtPw.Text);
+
+            if (result)
             {
-                //예약 폼(Seat.cs)으로 넘겨주기 위해 현재 로그인한 사용자의 ID를 전역 변수에 저장
                 loggedInUserId = txtId.Text;
 
                 MessageBox.Show($"{txtId.Text}님, 로그인 성공!");
-                reservationPanel.Enabled = true; // 로그인 성공 시 예약 패널 활성화
-                loginPanel.Enabled = false;      // 중복 로그인 방지
+                reservationPanel.Enabled = true;
+                loginPanel.Enabled = false;
 
                 lblStatus.Text = "날짜를 먼저 선택해주세요.";
                 lblStatus.ForeColor = Color.Blue;
-                lblStatus.Location = new Point(260, 460); // 글씨 길어지면 위치 살짝 조정
+                lblStatus.Location = new Point(260, 460);
+            }
+            else
+            {
+                MessageBox.Show("아이디 또는 비밀번호가 틀렸습니다.");
             }
         }
 
@@ -121,6 +127,11 @@ namespace Kiosk_StudyCafe
         private void BackgroundTimer_Tick(object? sender, EventArgs e)
         {
             dbManager.ProcessTimeoutsAndNoShows();
+        }
+
+        private void MainReserve_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }
