@@ -390,12 +390,10 @@ namespace Kiosk_StudyCafe
 
         private void BtnSignUp_Click(object? sender, EventArgs e)
         {
-            // 아직 백엔드 회원가입 폼을 병합하기 전이므로 임시 안내만 표시
-            MessageBox.Show(this,
-                "회원가입 기능은 백엔드 병합 단계에서 RegisterForm과 연결할 예정입니다.",
-                "회원가입 안내",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            using (var registerForm = new RegisterForm())
+            {
+                registerForm.ShowDialog(this);
+            }
         }
 
         private void BtnSelectSeat_Click(object? sender, EventArgs e)
