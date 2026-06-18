@@ -178,7 +178,7 @@ namespace Kiosk_StudyCafe
                 Text = $"사용자: {currentUserId}   |   예약일: {currentDate}",
                 ForeColor = Color.White,
                 Font = new Font("맑은 고딕", 10, FontStyle.Bold),
-                Location = new Point(285, 23),
+                Location = new Point(350, 23),
                 AutoSize = true
             };
 
