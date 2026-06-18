@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace Kiosk_StudyCafe
@@ -96,6 +97,7 @@ namespace Kiosk_StudyCafe
                     break;
 
                 case SeatStatus.Maintenance:
+                    // 본인 예약이 포함된 좌석은 마감 상태여도 상태 제어를 위해 초록색 유지
                     if (IsMine)
                     {
                         BackColor = myReservedColor;
@@ -396,7 +398,7 @@ namespace Kiosk_StudyCafe
             {
                 Text = text,
                 Location = new Point(x + 28, 16),
-                Size = new Size(70, 26),
+                Size = new Size(75, 26),
                 Font = new Font("맑은 고딕", 9, FontStyle.Bold),
                 ForeColor = foreColor == Color.White ? Color.FromArgb(50, 50, 50) : foreColor,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -412,25 +414,75 @@ namespace Kiosk_StudyCafe
             {
                 if (control is CafeSeat seat)
                 {
+                    // DB에 실제 예약된 시간
                     List<int> reservedHours = dbManager.GetReservedHours(seat.SeatNumber, currentDate);
+
+                    // 오늘 날짜 기준 이미 지나서 선택할 수 없는 시간
+                    List<int> closedHours = GetClosedHoursByDate(currentDate);
+
+                    // 예약된 시간 + 닫힌 시간 합산
+                    // 이 값은 "하루 전체가 막혔는지" 판단할 때만 사용
+                    List<int> blockedHours = reservedHours
+                        .Concat(closedHours)
+                        .Distinct()
+                        .OrderBy(h => h)
+                        .ToList();
+
                     bool hasMyRes = dbManager.IsMyReservation(currentUserId, seat.SeatNumber, currentDate);
 
                     seat.IsMine = hasMyRes;
 
-                    if (reservedHours.Count >= 24)
+                    // 1. 예약 + 지난 시간까지 합쳐서 24시간 전부 막혔으면 마감 처리
+                    if (blockedHours.Count >= 24)
                     {
                         seat.Status = SeatStatus.Maintenance;
                     }
+                    // 2. 실제 예약된 시간이 있을 때만 예약됨 노란색 처리
                     else if (reservedHours.Count > 0)
                     {
                         seat.Status = SeatStatus.Reserved;
                     }
+                    // 3. 지난 시간만 있고 실제 예약이 없으면 빈 좌석 유지
                     else
                     {
                         seat.Status = SeatStatus.Empty;
                     }
                 }
             }
+        }
+
+        private List<int> GetClosedHoursByDate(string dateText)
+        {
+            List<int> closedHours = new List<int>();
+
+            if (!DateTime.TryParse(dateText, out DateTime selectedDate))
+                return closedHours;
+
+            DateTime now = DateTime.Now;
+
+            // 과거 날짜는 하루 전체 예약 불가
+            if (selectedDate.Date < now.Date)
+            {
+                for (int i = 0; i < 24; i++)
+                {
+                    closedHours.Add(i);
+                }
+
+                return closedHours;
+            }
+
+            // 오늘 날짜는 현재 시간 이하를 예약 불가로 처리
+            // TimeSelectionForm과 동일하게 현재 시간대도 막음
+            if (selectedDate.Date == now.Date)
+            {
+                for (int i = 0; i <= now.Hour && i < 24; i++)
+                {
+                    closedHours.Add(i);
+                }
+            }
+
+            // 미래 날짜는 닫힌 시간 없음
+            return closedHours;
         }
 
         private void Seat_Click(object? sender, EventArgs e)
@@ -535,7 +587,7 @@ namespace Kiosk_StudyCafe
                             else
                             {
                                 MessageBox.Show(this,
-                                    "결제 도중 다른 사용자가 해당 시간대를 선점했습니다.\n환불 처리됩니다.",
+                                    "결제 도중 다른 사용자가 해당 시간대를 선점했거나 포인트가 부족합니다.\n결제는 취소됩니다.",
                                     "예약 실패",
                                     MessageBoxButtons.OK,
                                     MessageBoxIcon.Warning);
