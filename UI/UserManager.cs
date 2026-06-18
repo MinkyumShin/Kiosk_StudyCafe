@@ -48,7 +48,6 @@ namespace Kiosk_StudyCafe
                     cmd.ExecuteNonQuery();
                 }
 
-                // 기존 DB 호환용 컬럼 보강
                 TryAlter(conn, "ALTER TABLE Users ADD COLUMN Phone VARCHAR(20)");
                 TryAlter(conn, "ALTER TABLE Users ADD COLUMN RRN VARCHAR(10)");
                 TryAlter(conn, "ALTER TABLE Users ADD COLUMN Points INTEGER DEFAULT 0");
@@ -68,7 +67,6 @@ namespace Kiosk_StudyCafe
             }
             catch
             {
-                // 이미 컬럼이 있으면 무시
             }
         }
 
@@ -145,7 +143,7 @@ namespace Kiosk_StudyCafe
                                 INSERT INTO Users 
                                     (UserId, Password, Name, Phone, RRN, Points, CumulativeHours, CreatedAt)
                                 VALUES 
-                                    (@UserId, @Password, @Name, @Phone, @RRN, 10000, 0, @CreatedAt)";
+                                    (@UserId, @Password, @Name, @Phone, @RRN, 2000, 0, @CreatedAt)"; // 2000포인트로 하향 조정
 
                             using (var cmd = new SQLiteCommand(query, conn, transaction))
                             {
@@ -183,7 +181,6 @@ namespace Kiosk_StudyCafe
 
             userId = userId.Trim();
 
-            // 발표/테스트용 기본 계정 유지
             if ((userId == "admin" && password == "1234") ||
                 (userId == "A" && password == "123"))
             {
@@ -326,8 +323,6 @@ namespace Kiosk_StudyCafe
                 }
 
                 int afterHours = beforeHours + hours;
-
-                // 10시간 단위 누적 달성 횟수 차이만큼 보너스 지급
                 int beforeBonusCount = beforeHours / 10;
                 int afterBonusCount = afterHours / 10;
                 int bonusCount = afterBonusCount - beforeBonusCount;

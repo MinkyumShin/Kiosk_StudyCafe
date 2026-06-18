@@ -12,6 +12,7 @@ namespace Kiosk_StudyCafe
         private TextBox txtKeyword = null!;
         private ComboBox cboStatus = null!;
         private Label lblSummary = null!;
+        private TextBox txtSeatControl = null!;
 
         private readonly string connString = "Data Source=StudyCafe.sqlite;Version=3;";
         private readonly ReservationManager reservationManager = new ReservationManager();
@@ -25,8 +26,8 @@ namespace Kiosk_StudyCafe
         public AdminForm()
         {
             Text = "Key-Study 관리자 대시보드";
-            ClientSize = new Size(1050, 650);
-            MinimumSize = new Size(1050, 650);
+            ClientSize = new Size(1050, 720); // 좌석 제어 패널 추가를 위해 세로 길이 확장
+            MinimumSize = new Size(1050, 720);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
@@ -59,7 +60,7 @@ namespace Kiosk_StudyCafe
 
             Label lblSubTitle = new Label
             {
-                Text = "전체 예약 현황 조회 및 예약 상태 제어",
+                Text = "전체 예약 현황 조회 및 좌석 상태 제어",
                 ForeColor = Color.White,
                 Font = new Font("맑은 고딕", 9, FontStyle.Bold),
                 Location = new Point(28, 47),
@@ -128,7 +129,7 @@ namespace Kiosk_StudyCafe
             };
             cboStatus.Items.AddRange(new object[]
             {
-                "전체", "예약됨", "입실", "외출", "퇴실", "노쇼"
+                "전체", "예약됨", "입실", "외출", "퇴실", "노쇼", "이용완료", "강제퇴실"
             });
             cboStatus.SelectedIndex = 0;
 
@@ -198,7 +199,7 @@ namespace Kiosk_StudyCafe
             ApplyGridStyle();
             Controls.Add(dgv);
 
-            // ----- 관리자 제어 버튼 -----
+            // ----- 1. 선택 예약 제어 패널 -----
             Panel actionPanel = new Panel
             {
                 Location = new Point(20, 575),
@@ -245,7 +246,7 @@ namespace Kiosk_StudyCafe
             btnOuting.FlatAppearance.BorderSize = 0;
             btnOuting.Click += (s, e) => UpdateSelectedReservationStatus("외출");
 
-            Button btnForceCheckout = new Button
+            Button btnForceCheckoutRes = new Button
             {
                 Text = "강제 퇴실/취소",
                 Location = new Point(450, 10),
@@ -256,8 +257,8 @@ namespace Kiosk_StudyCafe
                 Font = new Font("맑은 고딕", 9, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
-            btnForceCheckout.FlatAppearance.BorderSize = 0;
-            btnForceCheckout.Click += BtnForceCheckout_Click;
+            btnForceCheckoutRes.FlatAppearance.BorderSize = 0;
+            btnForceCheckoutRes.Click += BtnForceCheckoutRes_Click;
 
             Label lblHelp = new Label
             {
@@ -272,9 +273,85 @@ namespace Kiosk_StudyCafe
             actionPanel.Controls.Add(lblActionInfo);
             actionPanel.Controls.Add(btnCheckIn);
             actionPanel.Controls.Add(btnOuting);
-            actionPanel.Controls.Add(btnForceCheckout);
+            actionPanel.Controls.Add(btnForceCheckoutRes);
             actionPanel.Controls.Add(lblHelp);
             Controls.Add(actionPanel);
+
+            // ----- 2. 특정 좌석 관리 패널 (점검/강제퇴실) -----
+            Panel seatControlPanel = new Panel
+            {
+                Location = new Point(20, 640),
+                Size = new Size(1010, 55),
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            Label lblSeatControlInfo = new Label
+            {
+                Text = "특정 좌석 제어 (번호 입력):",
+                Location = new Point(20, 15),
+                Size = new Size(190, 25),
+                Font = new Font("맑은 고딕", 10, FontStyle.Bold),
+                ForeColor = Color.FromArgb(60, 60, 60),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            txtSeatControl = new TextBox
+            {
+                Location = new Point(220, 14),
+                Size = new Size(80, 25),
+                PlaceholderText = "예: 12",
+                Font = new Font("맑은 고딕", 10)
+            };
+
+            Button btnSetMaintenance = new Button
+            {
+                Text = "점검 중 설정",
+                Location = new Point(320, 10),
+                Size = new Size(110, 34),
+                BackColor = Color.DimGray,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("맑은 고딕", 9, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnSetMaintenance.FlatAppearance.BorderSize = 0;
+            btnSetMaintenance.Click += BtnSetMaintenance_Click;
+
+            Button btnClearMaintenance = new Button
+            {
+                Text = "정상 상태 복구",
+                Location = new Point(440, 10),
+                Size = new Size(120, 34),
+                BackColor = primaryColor,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("맑은 고딕", 9, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnClearMaintenance.FlatAppearance.BorderSize = 0;
+            btnClearMaintenance.Click += BtnClearMaintenance_Click;
+
+            Button btnForceCheckoutSeat = new Button
+            {
+                Text = "해당 좌석 전체 강제퇴실",
+                Location = new Point(570, 10),
+                Size = new Size(180, 34),
+                BackColor = dangerColor,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("맑은 고딕", 9, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnForceCheckoutSeat.FlatAppearance.BorderSize = 0;
+            btnForceCheckoutSeat.Click += BtnForceCheckoutSeat_Click;
+
+            seatControlPanel.Controls.Add(lblSeatControlInfo);
+            seatControlPanel.Controls.Add(txtSeatControl);
+            seatControlPanel.Controls.Add(btnSetMaintenance);
+            seatControlPanel.Controls.Add(btnClearMaintenance);
+            seatControlPanel.Controls.Add(btnForceCheckoutSeat);
+            Controls.Add(seatControlPanel);
 
             AcceptButton = btnSearch;
         }
@@ -424,7 +501,7 @@ namespace Kiosk_StudyCafe
             LoadData();
         }
 
-        private void BtnForceCheckout_Click(object? sender, EventArgs e)
+        private void BtnForceCheckoutRes_Click(object? sender, EventArgs e)
         {
             int id = GetSelectedReservationId();
             if (id == -1)
@@ -448,6 +525,67 @@ namespace Kiosk_StudyCafe
                 MessageBoxIcon.Information);
 
             LoadData();
+        }
+
+        // --- 새로 추가된 좌석 기반 관리자 로직 ---
+
+        private void BtnSetMaintenance_Click(object? sender, EventArgs e)
+        {
+            if (int.TryParse(txtSeatControl.Text.Trim(), out int seatNum))
+            {
+                if (reservationManager.SetSeatMaintenance(seatNum, true))
+                {
+                    MessageBox.Show(this, $"{seatNum}번 좌석이 [점검 중]으로 설정되었습니다.\n(사용자는 해당 좌석을 예약할 수 없습니다.)", "완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    LoadData();
+                }
+            }
+            else
+            {
+                MessageBox.Show(this, "올바른 좌석 번호를 숫자로 입력해주세요.", "입력 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void BtnClearMaintenance_Click(object? sender, EventArgs e)
+        {
+            if (int.TryParse(txtSeatControl.Text.Trim(), out int seatNum))
+            {
+                if (reservationManager.SetSeatMaintenance(seatNum, false))
+                {
+                    MessageBox.Show(this, $"{seatNum}번 좌석이 정상 상태로 복구되었습니다.", "완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    LoadData();
+                }
+            }
+            else
+            {
+                MessageBox.Show(this, "올바른 좌석 번호를 숫자로 입력해주세요.", "입력 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void BtnForceCheckoutSeat_Click(object? sender, EventArgs e)
+        {
+            if (int.TryParse(txtSeatControl.Text.Trim(), out int seatNum))
+            {
+                DialogResult result = MessageBox.Show(this,
+                    $"{seatNum}번 좌석에 진행 중인 모든 예약을 강제 퇴실 처리하시겠습니까?",
+                    "강제 퇴실 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    if (reservationManager.ForceCheckout(seatNum))
+                    {
+                        MessageBox.Show(this, $"{seatNum}번 좌석의 활성 예약이 모두 강제 퇴실 처리되었습니다.", "처리 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        LoadData();
+                    }
+                    else
+                    {
+                        MessageBox.Show(this, "해당 좌석에 강제 퇴실 처리할 활성 예약(입실/외출)이 없습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            }
+            else
+            {
+                MessageBox.Show(this, "올바른 좌석 번호를 숫자로 입력해주세요.", "입력 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
     }
 }

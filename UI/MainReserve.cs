@@ -313,7 +313,11 @@ namespace Kiosk_StudyCafe
                 btnSelectSeat.Enabled = true;
                 btnLogout.Visible = true;
 
-                lblWelcome.Text = $"{loggedInUserId}님, 예약할 날짜를 선택해주세요.";
+                // 포인트 조회 및 환영 메시지에 반영
+                UserManager userManager = new UserManager();
+                int currentPoints = userManager.GetUserPoints(loggedInUserId);
+
+                lblWelcome.Text = $"{loggedInUserId}님 환영합니다! (보유 포인트: {currentPoints:N0} P)";
                 lblWelcome.ForeColor = Color.FromArgb(70, 70, 70);
                 lblWelcome.Location = new Point(0, 105);
                 lblWelcome.Size = new Size(500, 28);
@@ -367,8 +371,10 @@ namespace Kiosk_StudyCafe
             {
                 loggedInUserId = userId;
 
+                // 로그인 성공 안내에도 포인트 표시 추가
+                int currentPoints = userManager.GetUserPoints(userId);
                 MessageBox.Show(this,
-                    $"{userId}님, 로그인 성공!",
+                    $"{userId}님, 로그인 성공!\n현재 잔여 포인트는 {currentPoints:N0} P 입니다.",
                     "로그인 성공",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -414,6 +420,8 @@ namespace Kiosk_StudyCafe
             using (Seat seatForm = new Seat(selectedDate, loggedInUserId))
             {
                 seatForm.ShowDialog(this);
+                // 좌석 선택 창에서 결제로 인해 포인트가 변동되었을 수 있으므로 화면 갱신
+                SetLoginState(true);
             }
         }
 

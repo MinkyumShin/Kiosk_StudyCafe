@@ -98,7 +98,6 @@ namespace Kiosk_StudyCafe
                 using (var cmd = new SQLiteCommand(createSeatsQuery, conn)) cmd.ExecuteNonQuery();
                 using (var cmd = new SQLiteCommand(createResQuery, conn)) cmd.ExecuteNonQuery();
 
-                // 기존 DB 호환용 컬럼 보강
                 TryAlter(conn, "ALTER TABLE Seats ADD COLUMN Status VARCHAR(20) DEFAULT '정상'");
                 TryAlter(conn, "ALTER TABLE Reservations ADD COLUMN EndTime DATETIME");
                 TryAlter(conn, "ALTER TABLE Reservations ADD COLUMN ReservedHours VARCHAR(100)");
@@ -121,7 +120,6 @@ namespace Kiosk_StudyCafe
             }
             catch
             {
-                // 이미 컬럼이 있으면 무시
             }
         }
 
@@ -292,7 +290,24 @@ namespace Kiosk_StudyCafe
             }
         }
 
-        public bool ReserveSeat(string userId, int seatNumber, string date, List<int> selectedHours)
+        public bool IsSeatUnderMaintenance(int seatNumber)
+        {
+            using (var conn = new SQLiteConnection(connectionString))
+            {
+                conn.Open();
+
+                string statusQuery = "SELECT Status FROM Seats WHERE SeatNumber = @SeatNumber";
+                using (var statusCmd = new SQLiteCommand(statusQuery, conn))
+                {
+                    statusCmd.Parameters.AddWithValue("@SeatNumber", seatNumber);
+                    object? statusResult = statusCmd.ExecuteScalar();
+
+                    return statusResult != null && statusResult.ToString() == "점검중";
+                }
+            }
+        }
+
+        public bool ReserveSeat(string userId, int seatNumber, string date, List<int> selectedHours, bool usePoints = true)
         {
             if (string.IsNullOrWhiteSpace(userId) || selectedHours == null || selectedHours.Count == 0)
                 return false;
@@ -308,6 +323,8 @@ namespace Kiosk_StudyCafe
 
             int totalHours = normalizedHours.Count;
             int totalPrice = totalHours * PricePerHour;
+
+            int paymentAmountToRecord = usePoints ? totalPrice : 0;
 
             DateTime reservationDate = DateTime.Parse(date).Date;
             DateTime actualStartTime = reservationDate.AddHours(normalizedHours.First());
@@ -334,7 +351,6 @@ namespace Kiosk_StudyCafe
                             }
                         }
 
-                        // 예약 시간 충돌 검사
                         List<int> alreadyReserved = new List<int>();
 
                         string reservedQuery = $@"
@@ -365,8 +381,6 @@ namespace Kiosk_StudyCafe
                             return false;
                         }
 
-                        // 실제 가입 회원이면 포인트 차감
-                        // admin, A 테스트 계정은 Users 테이블에 없을 수 있으므로 포인트 차감 없이 테스트 가능하게 둠
                         bool userExists = false;
 
                         string userCheckQuery = "SELECT COUNT(*) FROM Users WHERE UserId = @UserId";
@@ -378,25 +392,41 @@ namespace Kiosk_StudyCafe
 
                         if (userExists)
                         {
-                            string pointQuery = "SELECT Points FROM Users WHERE UserId = @UserId";
-                            using (var pointCmd = new SQLiteCommand(pointQuery, conn, transaction))
+                            if (usePoints)
                             {
-                                pointCmd.Parameters.AddWithValue("@UserId", userId);
-                                object? res = pointCmd.ExecuteScalar();
-
-                                if (res == null || Convert.ToInt32(res) < totalPrice)
+                                string pointQuery = "SELECT Points FROM Users WHERE UserId = @UserId";
+                                using (var pointCmd = new SQLiteCommand(pointQuery, conn, transaction))
                                 {
-                                    transaction.Rollback();
-                                    return false;
+                                    pointCmd.Parameters.AddWithValue("@UserId", userId);
+                                    object? res = pointCmd.ExecuteScalar();
+
+                                    if (res == null || Convert.ToInt32(res) < totalPrice)
+                                    {
+                                        transaction.Rollback();
+                                        return false;
+                                    }
+                                }
+
+                                string deductQuery = "UPDATE Users SET Points = Points - @Cost WHERE UserId = @UserId";
+                                using (var deductCmd = new SQLiteCommand(deductQuery, conn, transaction))
+                                {
+                                    deductCmd.Parameters.AddWithValue("@Cost", totalPrice);
+                                    deductCmd.Parameters.AddWithValue("@UserId", userId);
+                                    deductCmd.ExecuteNonQuery();
                                 }
                             }
-
-                            string deductQuery = "UPDATE Users SET Points = Points - @Cost WHERE UserId = @UserId";
-                            using (var deductCmd = new SQLiteCommand(deductQuery, conn, transaction))
+                            else
                             {
-                                deductCmd.Parameters.AddWithValue("@Cost", totalPrice);
-                                deductCmd.Parameters.AddWithValue("@UserId", userId);
-                                deductCmd.ExecuteNonQuery();
+                                // 동적 계산: 1시간(2000원)당 500포인트 적립
+                                int rewardPoints = totalHours * 500;
+
+                                string rewardQuery = "UPDATE Users SET Points = Points + @RewardPoints WHERE UserId = @UserId";
+                                using (var rewardCmd = new SQLiteCommand(rewardQuery, conn, transaction))
+                                {
+                                    rewardCmd.Parameters.AddWithValue("@RewardPoints", rewardPoints);
+                                    rewardCmd.Parameters.AddWithValue("@UserId", userId);
+                                    rewardCmd.ExecuteNonQuery();
+                                }
                             }
                         }
 
@@ -415,7 +445,7 @@ namespace Kiosk_StudyCafe
                             insertCmd.Parameters.AddWithValue("@EndTime", actualEndTime.ToString("yyyy-MM-dd HH:mm:ss"));
                             insertCmd.Parameters.AddWithValue("@Hours", totalHours);
                             insertCmd.Parameters.AddWithValue("@ReservedHours", string.Join(",", normalizedHours));
-                            insertCmd.Parameters.AddWithValue("@PaymentAmount", totalPrice);
+                            insertCmd.Parameters.AddWithValue("@PaymentAmount", paymentAmountToRecord);
                             insertCmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                             insertCmd.ExecuteNonQuery();
                         }
@@ -585,7 +615,6 @@ namespace Kiosk_StudyCafe
                             userExists = (long)userCheckCmd.ExecuteScalar() > 0;
                         }
 
-                        // 예약 전 취소라면 전액 환불
                         if (userExists && status == "예약됨" && paymentAmount > 0)
                         {
                             string refundQuery = "UPDATE Users SET Points = Points + @Refund WHERE UserId = @UserId";
@@ -597,13 +626,24 @@ namespace Kiosk_StudyCafe
                             }
                         }
 
-                        // 입실/외출 상태에서 퇴실이면 누적 시간 반영
                         if (userExists && (status == "입실" || status == "외출") && durationHours > 0)
                         {
-                            string updateHourQuery = "UPDATE Users SET CumulativeHours = CumulativeHours + @Hours WHERE UserId = @UserId";
+                            int currentHours = 0;
+                            using (var hrCmd = new SQLiteCommand("SELECT CumulativeHours FROM Users WHERE UserId = @UserId", conn, transaction))
+                            {
+                                hrCmd.Parameters.AddWithValue("@UserId", userId);
+                                object? result = hrCmd.ExecuteScalar();
+                                if (result != null) currentHours = Convert.ToInt32(result);
+                            }
+
+                            int newHours = currentHours + durationHours;
+                            int bonusPoints = ((newHours / 10) - (currentHours / 10)) * 2000;
+
+                            string updateHourQuery = "UPDATE Users SET CumulativeHours = @NewHours, Points = Points + @Bonus WHERE UserId = @UserId";
                             using (var hourCmd = new SQLiteCommand(updateHourQuery, conn, transaction))
                             {
-                                hourCmd.Parameters.AddWithValue("@Hours", durationHours);
+                                hourCmd.Parameters.AddWithValue("@NewHours", newHours);
+                                hourCmd.Parameters.AddWithValue("@Bonus", bonusPoints);
                                 hourCmd.Parameters.AddWithValue("@UserId", userId);
                                 hourCmd.ExecuteNonQuery();
                             }
@@ -700,7 +740,6 @@ namespace Kiosk_StudyCafe
                             cmd.ExecuteNonQuery();
                         }
 
-                        // 노쇼 시 결제 포인트 50% 환불
                         int refundPoints = reservation.Item3 / 2;
 
                         if (!string.IsNullOrWhiteSpace(reservation.Item2) && refundPoints > 0)
@@ -785,10 +824,22 @@ namespace Kiosk_StudyCafe
 
                         if (userExists && reservation.Item3 > 0)
                         {
-                            string updateHourQuery = "UPDATE Users SET CumulativeHours = CumulativeHours + @Hours WHERE UserId = @UserId";
+                            int currentHours = 0;
+                            using (var hrCmd = new SQLiteCommand("SELECT CumulativeHours FROM Users WHERE UserId = @UserId", conn, transaction))
+                            {
+                                hrCmd.Parameters.AddWithValue("@UserId", reservation.Item2);
+                                object? result = hrCmd.ExecuteScalar();
+                                if (result != null) currentHours = Convert.ToInt32(result);
+                            }
+
+                            int newHours = currentHours + reservation.Item3;
+                            int bonusPoints = ((newHours / 10) - (currentHours / 10)) * 2000;
+
+                            string updateHourQuery = "UPDATE Users SET CumulativeHours = @NewHours, Points = Points + @Bonus WHERE UserId = @UserId";
                             using (var hourCmd = new SQLiteCommand(updateHourQuery, conn, transaction))
                             {
-                                hourCmd.Parameters.AddWithValue("@Hours", reservation.Item3);
+                                hourCmd.Parameters.AddWithValue("@NewHours", newHours);
+                                hourCmd.Parameters.AddWithValue("@Bonus", bonusPoints);
                                 hourCmd.Parameters.AddWithValue("@UserId", reservation.Item2);
                                 hourCmd.ExecuteNonQuery();
                             }

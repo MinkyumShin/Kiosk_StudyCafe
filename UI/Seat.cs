@@ -11,9 +11,9 @@ namespace Kiosk_StudyCafe
 
     public class CafeSeat : Button
     {
-        public int SeatNumber { get; set; }     // DB 연동용 고유 ID
+        public int SeatNumber { get; set; }
         public SeatType Type { get; set; }
-        public int DisplayNumber { get; set; }  // 화면 표시용 번호
+        public int DisplayNumber { get; set; }
 
         private SeatStatus _status = SeatStatus.Empty;
         private bool _isMine = false;
@@ -67,6 +67,7 @@ namespace Kiosk_StudyCafe
         private void UpdateColor()
         {
             Text = IsMine ? $"★\n{GetBaseText()}" : GetBaseText();
+            Font = new Font("맑은 고딕", 10, FontStyle.Bold);
 
             switch (Status)
             {
@@ -97,7 +98,6 @@ namespace Kiosk_StudyCafe
                     break;
 
                 case SeatStatus.Maintenance:
-                    // 본인 예약이 포함된 좌석은 마감 상태여도 상태 제어를 위해 초록색 유지
                     if (IsMine)
                     {
                         BackColor = myReservedColor;
@@ -109,6 +109,8 @@ namespace Kiosk_StudyCafe
                         BackColor = maintenanceColor;
                         ForeColor = Color.DimGray;
                         Enabled = true;
+                        Text = $"점검중\n{GetBaseText()}";
+                        Font = new Font("맑은 고딕", 8, FontStyle.Bold);
                     }
                     break;
             }
@@ -127,6 +129,8 @@ namespace Kiosk_StudyCafe
         private System.Windows.Forms.Timer clockTimer = null!;
         private Label lblClock = null!;
         private Label lblGuide = null!;
+
+        private Label lblUserInfo = null!;
 
         private readonly Color navyTheme = Color.FromArgb(20, 30, 70);
         private readonly Color primaryColor = Color.FromArgb(78, 128, 238);
@@ -175,14 +179,14 @@ namespace Kiosk_StudyCafe
                 AutoSize = true
             };
 
-            Label lblUserInfo = new Label
+            lblUserInfo = new Label
             {
-                Text = $"사용자: {currentUserId}   |   예약일: {currentDate}",
                 ForeColor = Color.White,
                 Font = new Font("맑은 고딕", 10, FontStyle.Bold),
                 Location = new Point(350, 23),
                 AutoSize = true
             };
+            UpdateUserInfo();
 
             lblClock = new Label
             {
@@ -208,8 +212,9 @@ namespace Kiosk_StudyCafe
             btnRefresh.FlatAppearance.BorderSize = 0;
             btnRefresh.Click += (s, e) =>
             {
+                UpdateUserInfo();
                 SyncSeatsWithDatabase();
-                MessageBox.Show(this, "좌석 상태를 새로고침했습니다.", "새로고침",
+                MessageBox.Show(this, "좌석 및 포인트 상태를 새로고침했습니다.", "새로고침",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
@@ -245,6 +250,16 @@ namespace Kiosk_StudyCafe
             clockTimer.Start();
 
             lblClock.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private void UpdateUserInfo()
+        {
+            if (lblUserInfo != null)
+            {
+                UserManager userManager = new UserManager();
+                int points = userManager.GetUserPoints(currentUserId);
+                lblUserInfo.Text = $"사용자: {currentUserId}   |   보유 포인트: {points:N0} P   |   예약일: {currentDate}";
+            }
         }
 
         private void InitGuideArea()
@@ -291,7 +306,6 @@ namespace Kiosk_StudyCafe
         {
             int dbSeatId = 1;
 
-            // --- 1. 1인석 48석 ---
             int singleDisplayNum = 1;
             int singleWidth = 52;
             int singleHeight = 38;
@@ -313,7 +327,6 @@ namespace Kiosk_StudyCafe
                 }
             }
 
-            // --- 2. 그룹석 20석 ---
             int groupDisplayNum = 1;
             int groupWidth = 82;
             int groupHeight = 74;
@@ -414,14 +427,9 @@ namespace Kiosk_StudyCafe
             {
                 if (control is CafeSeat seat)
                 {
-                    // DB에 실제 예약된 시간
                     List<int> reservedHours = dbManager.GetReservedHours(seat.SeatNumber, currentDate);
-
-                    // 오늘 날짜 기준 이미 지나서 선택할 수 없는 시간
                     List<int> closedHours = GetClosedHoursByDate(currentDate);
 
-                    // 예약된 시간 + 닫힌 시간 합산
-                    // 이 값은 "하루 전체가 막혔는지" 판단할 때만 사용
                     List<int> blockedHours = reservedHours
                         .Concat(closedHours)
                         .Distinct()
@@ -432,17 +440,14 @@ namespace Kiosk_StudyCafe
 
                     seat.IsMine = hasMyRes;
 
-                    // 1. 예약 + 지난 시간까지 합쳐서 24시간 전부 막혔으면 마감 처리
-                    if (blockedHours.Count >= 24)
+                    if (blockedHours.Count >= 24 || dbManager.IsSeatUnderMaintenance(seat.SeatNumber))
                     {
                         seat.Status = SeatStatus.Maintenance;
                     }
-                    // 2. 실제 예약된 시간이 있을 때만 예약됨 노란색 처리
                     else if (reservedHours.Count > 0)
                     {
                         seat.Status = SeatStatus.Reserved;
                     }
-                    // 3. 지난 시간만 있고 실제 예약이 없으면 빈 좌석 유지
                     else
                     {
                         seat.Status = SeatStatus.Empty;
@@ -460,7 +465,6 @@ namespace Kiosk_StudyCafe
 
             DateTime now = DateTime.Now;
 
-            // 과거 날짜는 하루 전체 예약 불가
             if (selectedDate.Date < now.Date)
             {
                 for (int i = 0; i < 24; i++)
@@ -471,8 +475,6 @@ namespace Kiosk_StudyCafe
                 return closedHours;
             }
 
-            // 오늘 날짜는 현재 시간 이하를 예약 불가로 처리
-            // TimeSelectionForm과 동일하게 현재 시간대도 막음
             if (selectedDate.Date == now.Date)
             {
                 for (int i = 0; i <= now.Hour && i < 24; i++)
@@ -481,7 +483,6 @@ namespace Kiosk_StudyCafe
                 }
             }
 
-            // 미래 날짜는 닫힌 시간 없음
             return closedHours;
         }
 
@@ -496,7 +497,7 @@ namespace Kiosk_StudyCafe
             if (clickedSeat.Status == SeatStatus.Maintenance && !hasMyRes)
             {
                 MessageBox.Show(this,
-                    "해당 좌석은 모든 시간대의 예약이 마감되었습니다.",
+                    "해당 좌석은 모든 시간대의 예약이 마감되었거나 점검 중입니다.",
                     "선택 불가",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -543,6 +544,7 @@ namespace Kiosk_StudyCafe
                                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                             }
 
+                            UpdateUserInfo();
                             SyncSeatsWithDatabase();
                         }
                     }
@@ -555,7 +557,6 @@ namespace Kiosk_StudyCafe
                 }
             }
 
-            // 추가 예약 플로우
             List<int> reservedHours = dbManager.GetReservedHours(clickedSeat.SeatNumber, currentDate);
 
             using (var timeForm = new TimeSelectionForm(clickedSeat.SeatNumber, DateTime.Parse(currentDate), reservedHours))
@@ -565,7 +566,7 @@ namespace Kiosk_StudyCafe
                     int totalHours = timeForm.SelectedHours.Count;
                     int totalPrice = totalHours * 2000;
 
-                    using (var paymentForm = new PaymentForm(totalHours, totalPrice))
+                    using (var paymentForm = new PaymentForm(currentUserId, totalHours, totalPrice))
                     {
                         if (paymentForm.ShowDialog(this) == DialogResult.OK && paymentForm.IsPaid)
                         {
@@ -573,13 +574,23 @@ namespace Kiosk_StudyCafe
                                 currentUserId,
                                 clickedSeat.SeatNumber,
                                 currentDate,
-                                timeForm.SelectedHours
+                                timeForm.SelectedHours,
+                                paymentForm.UsePoints
                             );
 
                             if (isSuccess)
                             {
+                                string msg = "결제 및 예약이 확정되었습니다.";
+
+                                if (!paymentForm.UsePoints)
+                                {
+                                    // 결제 금액(시간)에 비례하는 보너스 메시지로 수정
+                                    int rewardPoints = totalHours * 500;
+                                    msg += $"\n신용카드 결제 혜택으로 {rewardPoints:N0} 포인트가 추가로 적립되었습니다!";
+                                }
+
                                 MessageBox.Show(this,
-                                    "결제 및 예약이 확정되었습니다.",
+                                    msg,
                                     "예약 완료",
                                     MessageBoxButtons.OK,
                                     MessageBoxIcon.Information);
@@ -593,6 +604,7 @@ namespace Kiosk_StudyCafe
                                     MessageBoxIcon.Warning);
                             }
 
+                            UpdateUserInfo();
                             SyncSeatsWithDatabase();
                         }
                     }
